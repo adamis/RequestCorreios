@@ -7,11 +7,15 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.text.NumberFormat;
 import java.text.ParseException;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -24,12 +28,16 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.xml.XmlMapper;
+import com.j256.ormlite.support.ConnectionSource;
+import com.j256.ormlite.table.TableUtils;
 
 import br.com.adamis.enuns.TypeEnvio;
 import br.com.adamis.filters.DadosEnderecos;
+import br.com.adamis.orm.daos.EnderecosDAO;
+import br.com.adamis.orm.datasources.MySQLBuilder;
+import br.com.adamis.orm.entity.Enderecos;
+import br.com.adamis.responses.CepResponse;
 import br.com.adamis.responses.PrazoMaximo;
 import br.com.adamis.responses.PrecoPrazoData;
 import br.com.adamis.utils.StaticUtils;
@@ -43,44 +51,70 @@ import br.com.adamis.utils.StaticUtils;
  *
  */
 public class Main {
+		
+	private static final String USER_AGENT = "Mozilla/5.0";
 	
-	
-	
-	
-	
-	/**
-	 * @param args
-	 * @throws Exception 
-	 */
 	public static void main(String[] args) throws Exception {
 		
-		DadosEnderecos dadosEnderecos = new DadosEnderecos();
-        dadosEnderecos.setnCdEmpresa("");
-        dadosEnderecos.setsDsSenha("");
-        
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(new Date());
-        calendar.add(Calendar.DAY_OF_MONTH, 2);
-        
-        dadosEnderecos.setsDtCalculo(calendar.getTime());
-        dadosEnderecos.setnCdServico(TypeEnvio.PAC_Varejo);
-        dadosEnderecos.setsCepOrigem(38046622);
-        dadosEnderecos.setsCepDestino(38195000);
-        dadosEnderecos.setnVlPeso(1);
-        dadosEnderecos.setnCdFormato(1);
-        dadosEnderecos.setnVlComprimento(20);
-        dadosEnderecos.setnVlAltura(5);
-        dadosEnderecos.setnVlLargura(15);
-        dadosEnderecos.setnVlDiametro(0);
-        dadosEnderecos.setsCdMaoPropria("n");
-        dadosEnderecos.setnVlValorDeclarado(100);
-        dadosEnderecos.setsCdAvisoRecebimento("n");
+		
+		MySQLBuilder builder = new MySQLBuilder();
+		ConnectionSource connectionSource = builder.getConnectionSource();		
+		
+		EnderecosDAO enderecosDAO = new EnderecosDAO(connectionSource);
+		//enderecosDAO.queryBuilder().where().eq("", enderecosDAO);
+		
+		List<Enderecos> queryForAll = enderecosDAO.queryForAll();
+		
+		Double total = 0D;
+		
+		for (int i = 0; i < queryForAll.size(); i++) {
+					
+			DadosEnderecos dadosEnderecos = new DadosEnderecos();
+	        dadosEnderecos.setnCdEmpresa("");
+	        dadosEnderecos.setsDsSenha("");
+	        
+	        Calendar calendar = Calendar.getInstance();
+	        calendar.setTime(new Date());
+	        calendar.add(Calendar.DAY_OF_MONTH, 4);
+	        
+	        dadosEnderecos.setsDtCalculo(calendar.getTime());
+	        dadosEnderecos.setnCdServico(TypeEnvio.PAC_Varejo);
+	        dadosEnderecos.setsCepOrigem(Integer.valueOf(queryForAll.get(i).getCepOrigem()));
+	        dadosEnderecos.setsCepDestino(Integer.valueOf(queryForAll.get(i).getCep()));
+	        dadosEnderecos.setnVlPeso(1);
+	        dadosEnderecos.setnCdFormato(1);
+	        dadosEnderecos.setnVlComprimento(20);
+	        dadosEnderecos.setnVlAltura(5);
+	        dadosEnderecos.setnVlLargura(15);
+	        dadosEnderecos.setnVlDiametro(0);
+	        dadosEnderecos.setsCdMaoPropria("n");
+	        dadosEnderecos.setnVlValorDeclarado(100);
+	        dadosEnderecos.setsCdAvisoRecebimento("n");
+	
+	        PrazoMaximo prazoMaximo = callPrazoMaximo(StaticUtils.URL_PRAZO_DATA, dadosEnderecos);	        
+	        PrecoPrazoData precoPrazoData = callPrecoPrazoData(StaticUtils.URL_PRECO_PRAZO_DATA, dadosEnderecos);
+	        //System.err.println("cep>"+listCep.get(i)+" Data>"+prazoMaximo.getDataMaxEntrega()+" valor>"+precoPrazoData.getValor());
+	        CepResponse callRequestCEP = callRequestCEP(queryForAll.get(i).getCep());
+	        
+	        Enderecos enderecos = queryForAll.get(i);	        
+	        enderecos.setBairro(callRequestCEP.getBairro());
+	        enderecos.setCidade(callRequestCEP.getLocalidade());
+	        enderecos.setEstado(callRequestCEP.getUf());
+	        enderecos.setLogradouro(callRequestCEP.getLogradouro());
+	        enderecos.setDataEnvio(dadosEnderecos.getsDtCalculo());
+	        enderecos.setDataRecebimento(prazoMaximo.getDataMaxEntrega());
+	        enderecos.setValorEnvio(""+precoPrazoData.getValor());
+	        
+	        enderecosDAO.update(enderecos);
+	        
+//
+//	        total += precoPrazoData.getValor();        
 
-        NodeList callRequest = callRequest(StaticUtils.URL_PRAZO_DATA, dadosEnderecos);
-        
-        //PrecoPrazoData precoPrazoData = callPrecoPrazoData(StaticUtils.URL_PRECO_PRAZO_DATA, dadosEnderecos);
-        //System.err.println(""+precoPrazoData.getValor());
-
+	        
+	        
+		}
+		
+		System.err.println("TOTAL>"+total);
 	}
 
 	/**
@@ -92,8 +126,7 @@ public class Main {
 	 */
 	public static PrazoMaximo callPrazoMaximo(String urlApi, DadosEnderecos dadosEnderecos) throws Exception {
 		NodeList callRequest = callRequest(urlApi, dadosEnderecos);
-		PrazoMaximo convertToPrazoMaximo = convertToPrazoMaximo(callRequest);
-        return convertToPrazoMaximo;
+		return convertToPrazoMaximo(callRequest);        
 	}
 	
 	/**
@@ -105,8 +138,49 @@ public class Main {
 	 */
 	public static PrecoPrazoData callPrecoPrazoData(String urlApi, DadosEnderecos dadosEnderecos) throws Exception {
 		NodeList callRequest = callRequest(urlApi, dadosEnderecos);
-		PrecoPrazoData convertToPrecoPrazoData = convertToPrecoPrazoData(callRequest);
-        return convertToPrecoPrazoData;
+		return convertToPrecoPrazoData(callRequest);        
+	}
+	
+	private static CepResponse callRequestCEP(String cep) {		
+		URL url;
+		CepResponse cepResponse = null;
+		
+		try {		
+			
+			url = new URL("https://viacep.com.br/ws/"+cep+"/json/");	
+			
+			HttpURLConnection con = (HttpURLConnection) url.openConnection();
+			con.setRequestMethod("GET");
+			con.setRequestProperty("User-Agent", USER_AGENT);
+			con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+			int responseCode = con.getResponseCode();
+			//System.out.println("GET Response Code :: " + responseCode);
+			if (responseCode == HttpURLConnection.HTTP_OK) { // success
+				BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+				String inputLine;
+				StringBuffer response = new StringBuffer();
+
+				while ((inputLine = in.readLine()) != null) {
+					response.append(inputLine);
+				}
+				in.close();
+				
+				byte[] germanBytes = response.toString().getBytes();
+				String asciiEncodedString = new String(germanBytes, StandardCharsets.UTF_8);				
+								
+				ObjectMapper mapper = new ObjectMapper();
+				cepResponse = mapper.readValue(asciiEncodedString, CepResponse.class);				
+				
+			} else {
+				System.out.println("GET request did not work.");
+			}
+						
+		} catch (Exception e) {			
+			e.printStackTrace();
+		}
+		
+		return cepResponse;
+		
 	}
 	
 	private static NodeList callRequest(String urlApi, DadosEnderecos dadosEnderecos) throws Exception {
@@ -115,10 +189,7 @@ public class Main {
         
         ObjectMapper oMapper = new ObjectMapper();
         params = oMapper.convertValue(dadosEnderecos, Map.class);
-        System.err.println("---------------------------------");
-        System.err.println("PARAMETROS> "+params.toString());
-        System.err.println("---------------------------------");
-        
+                
         StringBuilder postData = new StringBuilder();
         for (Map.Entry<String,Object> param : params.entrySet()) {
             if (postData.length() != 0) postData.append('&');
@@ -144,6 +215,7 @@ public class Main {
             temp += (char)c;
         }
         System.out.println("---------------------------------");
+        System.err.println("PARAMETROS> "+params.toString());        
         System.out.println("RESULT>> "+temp);
         System.out.println("---------------------------------");
         
@@ -208,10 +280,10 @@ public class Main {
         		if("DataMaxEntrega".equals(childNodesAtributos.item(i).getNodeName())) {
         			prazoMaximo.setDataMaxEntrega(childNodesAtributos.item(i).getTextContent());
         		}
-        		System.err.println(
-        				childNodesAtributos.item(i).getNodeName()
-        				+ "Valor> "+ childNodesAtributos.item(i).getTextContent()
-        		);
+//        		System.err.println(
+//        				childNodesAtributos.item(i).getNodeName()
+//        				+ "Valor> "+ childNodesAtributos.item(i).getTextContent()
+//        		);
         	}
         }
 		
@@ -234,11 +306,9 @@ public class Main {
 					try {
 						number = format.parse(childNodesAtributos.item(i).getTextContent());
 						d = number.doubleValue();
-					} catch (DOMException e) {						
+					} catch (DOMException | ParseException e) {						
 						e.printStackTrace();
-					} catch (ParseException e) {						
-						e.printStackTrace();
-					}       		    
+					}	    
         			
         			precoPrazoData.setValor(d);
         		}
@@ -261,17 +331,17 @@ public class Main {
         			precoPrazoData.setObsFim(childNodesAtributos.item(i).getTextContent());
         		}        		
         		
-        		System.err.println(
-        				childNodesAtributos.item(i).getNodeName()
-        				+ "Valor> "+ childNodesAtributos.item(i).getTextContent()
-        		);
+//        		System.err.println(
+//        				childNodesAtributos.item(i).getNodeName()
+//        				+ "Valor> "+ childNodesAtributos.item(i).getTextContent()
+//        		);
         	}
         }
 		
 		return precoPrazoData;
 	}
 	
-	 private static Document convertStringToXMLDocument(String xmlString) 
+	private static Document convertStringToXMLDocument(String xmlString) 
 	  {
 	    //Parser that produces DOM object trees from XML content
 	    DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
